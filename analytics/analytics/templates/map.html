@@ -1,0 +1,172 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Global AQI Map</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+      <style>
+            :root {
+                  --bg-color: #0f172a;
+                  --card-bg: #1e293b;
+                  --text-primary: #f8fafc;
+                  --text-secondary: #94a3b8;
+                  --accent: #38bdf8;
+                  --glass: rgba(30, 41, 59, 0.7);
+            }
+
+            body {
+                  background-color: var(--bg-color);
+                  color: var(--text-primary);
+                  font-family: 'Inter', sans-serif;
+                  margin: 0;
+                  padding: 20px;
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  min-height: 100vh;
+            }
+
+            h1 {
+                  font-weight: 600;
+                  letter-spacing: -0.5px;
+                  margin-bottom: 10px;
+            }
+
+            .header {
+                  text-align: center;
+                  margin-bottom: 30px;
+                  animation: fadeIn 1s ease-out;
+            }
+
+            .status-badge {
+                  background: rgba(16, 185, 129, 0.2);
+                  color: #34d399;
+                  padding: 5px 12px;
+                  border-radius: 20px;
+                  font-size: 0.85rem;
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 6px;
+            }
+
+            .status-dot {
+                  width: 8px;
+                  height: 8px;
+                  background: #34d399;
+                  border-radius: 50%;
+                  animation: pulse 2s infinite;
+            }
+
+            #map-container {
+                  background: var(--card-bg);
+                  border-radius: 16px;
+                  padding: 10px;
+                  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+                  border: 1px solid rgba(255, 255, 255, 0.05);
+                  backdrop-filter: blur(10px);
+                  width: 100%;
+                  max-width: 1200px;
+                  height: 80vh;
+                  position: relative;
+                  overflow: hidden;
+            }
+
+            #map {
+                  width: 100%;
+                  height: 100%;
+                  border-radius: 12px;
+            }
+
+            @keyframes pulse {
+                  0% {
+                        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.4);
+                  }
+
+                  70% {
+                        box-shadow: 0 0 0 10px rgba(52, 211, 153, 0);
+                  }
+
+                  100% {
+                        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+                  }
+            }
+
+            @keyframes fadeIn {
+                  from {
+                        opacity: 0;
+                        transform: translateY(-10px);
+                  }
+
+                  to {
+                        opacity: 1;
+                        transform: translateY(0);
+                  }
+            }
+      </style>
+</head>
+
+<body>
+      <div class="header">
+            <a href="/"
+                  style="position: absolute; left: 20px; top: 20px; text-decoration: none; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; transition: all 0.02s; display: flex; align-items: center; gap: 5px;">
+                  ← Home
+            </a>
+            <h1>Global AQI Map</h1>
+            <div class="status-badge">
+                  <div class="status-dot"></div>
+                  Live Heatmap
+            </div>
+      </div>
+
+      <div id="map-container">
+            <div id="map"></div>
+      </div>
+
+      <script src="https://maps.googleapis.com/maps/api/js"></script>
+      <script>
+            var map = new google.maps.Map(document.getElementById('map'), {
+                  center: new google.maps.LatLng(12.97160, 77.59456),
+                  mapTypeId: google.maps.MapTypeId.ROADMAP,
+                  zoom: 11,
+                  styles: [
+                        { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
+                        { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
+                        { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
+                        {
+                              featureType: 'administrative.locality',
+                              elementType: 'labels.text.fill',
+                              stylers: [{ color: '#d59563' }]
+                        },
+                        {
+                              featureType: 'poi',
+                              elementType: 'labels.text.fill',
+                              stylers: [{ color: '#d59563' }]
+                        },
+                        {
+                              featureType: 'poi.park',
+                              elementType: 'geometry',
+                              stylers: [{ color: '#263c3f' }]
+                        },
+                        {
+                              featureType: 'water',
+                              elementType: 'geometry',
+                              stylers: [{ color: '#17263c' }]
+                        }
+                  ]
+            });
+
+            var waqiMapOverlay = new google.maps.ImageMapType({
+                  getTileUrl: function (coord, zoom) {
+                        return 'https://tiles.aqicn.org/tiles/usepa-aqi/' + zoom + "/" + coord.x + "/" + coord.y + ".png?token=38abf87b6de4a7b5cdfa52f63ceea66fdd910103";
+                  },
+                  name: "Air  Quality",
+            });
+
+            map.overlayMapTypes.insertAt(0, waqiMapOverlay);  
+      </script>
+</body>
+
+</html>

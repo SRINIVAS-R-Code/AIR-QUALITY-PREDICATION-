@@ -1,0 +1,484 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AQI Analytics | {{ city|title }}</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #38bdf8;
+            --glass: rgba(30, 41, 59, 0.7);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        h1 {
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            margin-bottom: 10px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeIn 1s ease-out;
+        }
+
+        .status-badge {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #34d399;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        #chart-container {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            width: 100%;
+            max-width: 900px;
+            position: relative;
+        }
+
+        /* D3 Chart Styles */
+        .line {
+            fill: none;
+            stroke-width: 3px;
+            stroke-linecap: round;
+            filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));
+        }
+
+        .axis text {
+            fill: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .axis path,
+        .axis line {
+            stroke: #334155;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(52, 211, 153, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <a href="/"
+            style="position: absolute; left: 20px; top: 20px; text-decoration: none; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; transition: all 0.2s; display: flex; align-items: center; gap: 5px;">
+            ← Home
+        </a>
+        <h1>{{ city|title }} Air Quality</h1>
+        <div class="status-badge">
+            <div class="status-dot"></div>
+            Live Updates
+        </div>
+    </div>
+
+    <div id="chart-container">
+        <div id="chart"></div>
+    </div>
+
+    <script>
+        const city = "{{ city }}";
+        let isFirstLoad = true;
+
+        // Cities list for navigation
+        const cities = [
+            'bangalore', 'delhi', 'mumbai', 'chennai', 'kolkata',
+            'hyderabad', 'pune', 'ahmedabad', 'jaipur', 'lucknow',
+            'chandigarh', 'nagpur'
+        ];
+
+        // Highlight current city in list or add if missing
+        let currentIndex = cities.indexOf(city.toLowerCase());
+
+        document.addEventListener('keydown', function (event) {
+            if (event.code === 'ArrowRight') {
+                // Next City
+                let nextIndex = (currentIndex + 1) % cities.length;
+                window.location.href = `/dashboard/${cities[nextIndex]}/`;
+            } else if (event.code === 'ArrowLeft') {
+                // Prev City
+                let prevIndex = (currentIndex - 1 + cities.length) % cities.length;
+                window.location.href = `/dashboard/${cities[prevIndex]}/`;
+            } else if (event.code === 'Space') {
+                // Toggle Scroll or Interaction
+                event.preventDefault();
+                const table = document.querySelector('#history-table-container div');
+                if (table) {
+                    table.scrollBy({ top: 100, behavior: 'smooth' });
+                }
+            }
+        });
+
+        async function fetchAndPlot() {
+            try {
+                const response = await fetch(`/api/aqi-data/${city}`);
+                const data = await response.json();
+
+                // Process data
+                if (!data || data.length === 0) return;
+
+                const timeData = data.map(item => new Date(item.timestamp));
+                const pollutants = ["co", "no2", "pm25", "pm10", "so2", "o3"];
+
+                const pollutantData = pollutants.map(pollutant => ({
+                    name: pollutant,
+                    values: data.map(item => item.pollutants[pollutant]?.v || 0)
+                }));
+
+                drawChart(timeData, pollutantData);
+                updateMetrics(data);
+                updateHistoryTable(data);
+            } catch (error) {
+                console.error("Error fetching data:", error);
+            }
+        }
+
+        function drawChart(timeData, pollutantData) {
+            d3.select("#chart").html(""); // Clear previous chart
+
+            const containerWidth = document.getElementById('chart-container').clientWidth - 60;
+            const margin = { top: 20, right: 80, bottom: 30, left: 50 };
+            const width = containerWidth - margin.left - margin.right;
+            const height = 400 - margin.top - margin.bottom;
+
+            const svg = d3.select("#chart")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // Scales
+            const x = d3.scaleTime().range([0, width]);
+            const y = d3.scaleLinear().range([height, 0]);
+
+            x.domain(d3.extent(timeData));
+            const maxVal = d3.max(pollutantData, d => d3.max(d.values));
+            y.domain([0, maxVal * 1.1]); // Add 10% headroom
+
+            // Gridlines
+            const make_y_gridlines = () => d3.axisLeft(y).ticks(5);
+            svg.append("g")
+                .attr("class", "grid")
+                .attr("opacity", 0.1)
+                .call(make_y_gridlines()
+                    .tickSize(-width)
+                    .tickFormat("")
+                );
+
+            // Lines
+            const line = d3.line()
+                .curve(d3.curveMonotoneX) // Smooth curves
+                .x((d, i) => x(timeData[i]))
+                .y(d => y(d));
+
+            const colorMap = {
+                "co": "#4ade80", "no2": "#60a5fa", "pm25": "#f87171",
+                "pm10": "#fb923c", "so2": "#a78bfa", "o3": "#f472b6"
+            };
+
+            pollutantData.forEach(pollutant => {
+                const path = svg.append("path")
+                    .data([pollutant.values])
+                    .attr("class", "line")
+                    .attr("d", line)
+                    .style("stroke", colorMap[pollutant.name] || "#ccc")
+                    .style("fill", "none");
+
+                // Animation on first load
+                if (isFirstLoad) {
+                    const totalLength = path.node().getTotalLength();
+                    path
+                        .attr("stroke-dasharray", totalLength + " " + totalLength)
+                        .attr("stroke-dashoffset", totalLength)
+                        .transition()
+                        .duration(2000)
+                        .ease(d3.easeCubicOut)
+                        .attr("stroke-dashoffset", 0);
+                }
+
+                // Legend/Label
+                svg.append("text")
+                    .attr("transform", `translate(${width + 10},${y(pollutant.values[pollutant.values.length - 1])})`)
+                    .attr("dy", ".35em")
+                    .style("fill", colorMap[pollutant.name])
+                    .style("font-size", "12px")
+                    .style("font-weight", "bold")
+                    .text(pollutant.name.toUpperCase());
+            });
+
+            // Axes
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .attr("class", "axis")
+                .call(d3.axisBottom(x));
+
+            svg.append("g")
+                .attr("class", "axis")
+                .call(d3.axisLeft(y));
+
+            isFirstLoad = false;
+        }
+
+        function updateMetrics(data) {
+            if (data.length < 2) return;
+
+            const latest = data[0];
+            const previous = data[1];
+            const pollutants = ["pm25", "pm10", "no2", "o3", "co", "so2"];
+
+            const metricsContainer = document.getElementById('metrics-grid');
+            if (!metricsContainer) {
+                // Create container if not exists
+                const container = document.createElement('div');
+                container.id = 'metrics-grid';
+                container.style.display = 'grid';
+                container.style.gridTemplateColumns = 'repeat(auto-fit, minmax(150px, 1fr))';
+                container.style.gap = '15px';
+                container.style.width = '100%';
+                container.style.maxWidth = '900px';
+                container.style.marginTop = '20px';
+                document.getElementById('chart-container').after(container);
+            }
+
+            // Health Advice Widget
+            const adviceContainerId = 'health-advice-widget';
+            let adviceContainer = document.getElementById(adviceContainerId);
+            if (!adviceContainer) {
+                adviceContainer = document.createElement('div');
+                adviceContainer.id = adviceContainerId;
+                adviceContainer.style.background = 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%)';
+                adviceContainer.style.borderRadius = '16px';
+                adviceContainer.style.padding = '25px';
+                adviceContainer.style.marginTop = '20px';
+                adviceContainer.style.border = '1px solid rgba(255,255,255,0.05)';
+                adviceContainer.style.maxWidth = '900px';
+                adviceContainer.style.width = '100%';
+
+                document.getElementById('metrics-grid').before(adviceContainer);
+            }
+
+            const aqi = latest.aqi;
+            let advice = { title: "", text: "", color: "" };
+
+            if (aqi <= 50) {
+                advice = { title: "Condition: Good 🟢", text: "Air quality is ideal for outdoor activities. Open your windows and enjoy fresh air!", color: "#4ade80" };
+            } else if (aqi <= 100) {
+                advice = { title: "Condition: Moderate 🟡", text: "Air quality is acceptable. Sensitive individuals should limit prolonged outdoor exertion.", color: "#facc15" };
+            } else if (aqi <= 150) {
+                advice = { title: "Condition: Unhealthy for Sensitive Groups 🟠", text: "Children, asthmatics, and older adults should reduce outdoor activity.", color: "#fb923c" };
+            } else if (aqi <= 200) {
+                advice = { title: "Condition: Unhealthy 🔴", text: "Wear a mask if outside. Everyone may begin to experience health effects.", color: "#f87171" };
+            } else if (aqi <= 300) {
+                advice = { title: "Condition: Very Unhealthy 🟣", text: "Health Alert: The risk of health effects is increased for everyone. Avoid outdoor activities.", color: "#a855f7" };
+            } else {
+                advice = { title: "Condition: Hazardous 🟤", text: "Emergency warning. Everyone is more likely to be affected. Stay indoors!", color: "#7f1d1d" };
+            }
+
+            adviceContainer.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div style="font-size: 2.5rem;">🩺</div>
+                    <div>
+                        <h3 style="margin: 0 0 5px 0; color: ${advice.color}; font-size: 1.2rem;">${advice.title}</h3>
+                        <p style="margin: 0; color: var(--text-secondary); line-height: 1.5;">${advice.text}</p>
+                    </div>
+                </div>
+            `;
+
+            const container = document.getElementById('metrics-grid');
+            container.innerHTML = ''; // Clear current
+
+            pollutants.forEach(p => {
+                const currentVal = latest.pollutants[p]?.v || 0;
+                const prevVal = previous.pollutants[p]?.v || 0;
+
+                let percentChange = 0;
+                if (prevVal > 0) {
+                    percentChange = ((currentVal - prevVal) / prevVal) * 100;
+                }
+
+                const isRising = percentChange > 0;
+                const color = isRising ? '#f87171' : '#4ade80'; // Red if rising (bad), Green if falling (good)
+                const arrow = isRising ? '▲' : '▼';
+
+                const card = document.createElement('div');
+                card.style.background = 'var(--card-bg)';
+                card.style.padding = '15px';
+                card.style.borderRadius = '12px';
+                card.style.border = '1px solid rgba(255,255,255,0.05)';
+                card.style.display = 'flex';
+                card.style.flexDirection = 'column';
+                card.style.alignItems = 'center';
+
+                card.innerHTML = `
+                    <div style="font-size: 0.9rem; color: var(--text-secondary); text-transform: uppercase;">${p}</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; margin: 5px 0;">${currentVal}</div>
+                    <div style="font-size: 0.8rem; color: ${color}; font-weight: 600;">
+                        ${Math.abs(percentChange).toFixed(1)}% ${arrow}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function updateHistoryTable(data) {
+            const tableContainer = document.getElementById('history-table-container');
+            if (!tableContainer) {
+                const container = document.createElement('div');
+                container.id = 'history-table-container';
+                container.style.width = '100%';
+                container.style.maxWidth = '900px';
+                container.style.marginTop = '40px';
+                container.style.background = 'var(--card-bg)';
+                container.style.borderRadius = '16px';
+                container.style.padding = '20px';
+                container.style.border = '1px solid rgba(255,255,255,0.05)';
+
+                container.innerHTML = `
+                    <h3 style="color: var(--text-primary); margin-bottom: 20px;">Recent History Log</h3>
+                    <div style="overflow-x: auto; max-height: 500px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; color: var(--text-secondary); font-size: 0.9rem;">
+                            <thead style="position: sticky; top: 0; background: var(--card-bg);">
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1); text-align: left;">
+                                    <th style="padding: 12px;">Time</th>
+                                    <th style="padding: 12px;">AQI</th>
+                                    <th style="padding: 12px;">PM2.5</th>
+                                    <th style="padding: 12px;">PM10</th>
+                                    <th style="padding: 12px;">NO2</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body"></tbody>
+                        </table>
+                    </div>
+                `;
+                document.getElementById('metrics-grid').after(container);
+            }
+
+            const tbody = document.getElementById('history-table-body');
+            tbody.innerHTML = '';
+
+            // Iterate data to build rows. data[i] is newer than data[i+1]
+            // Show all records returned by API (up to 2000)
+            const limit = data.length - 1;
+
+            for (let i = 0; i < limit; i++) {
+                const current = data[i];
+                const prev = data[i + 1]; // The record immediately before 'current'
+
+                const date = new Date(current.timestamp).toLocaleTimeString();
+
+                // Helper to render value and arrow
+                const renderCell = (val, prevVal) => {
+                    let diff = 0;
+                    if (prevVal > 0) diff = ((val - prevVal) / prevVal) * 100;
+
+                    const color = diff > 0 ? '#f87171' : (diff < 0 ? '#4ade80' : 'inherit');
+                    const arrow = diff > 0 ? '▲' : (diff < 0 ? '▼' : '-');
+
+                    if (Math.abs(diff) < 0.01) {
+                        return `<span>${val}</span>`;
+                    }
+
+                    return `
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>${val}</span>
+                            <span style="font-size: 0.75rem; color: ${color}; bg-opacity: 0.1; padding: 2px 6px; border-radius: 4px; background: ${color}20;">
+                                ${Math.abs(diff).toFixed(1)}% ${arrow}
+                            </span>
+                        </div>
+                    `;
+                };
+
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+
+                row.innerHTML = `
+                    <td style="padding: 12px;">${date}</td>
+                    <td style="padding: 12px;">${renderCell(current.aqi, prev.aqi)}</td>
+                    <td style="padding: 12px;">${renderCell(current.pollutants.pm25?.v || 0, prev.pollutants.pm25?.v || 0)}</td>
+                    <td style="padding: 12px;">${renderCell(current.pollutants.pm10?.v || 0, prev.pollutants.pm10?.v || 0)}</td>
+                    <td style="padding: 12px;">${renderCell(current.pollutants.no2?.v || 0, prev.pollutants.no2?.v || 0)}</td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        // Initial fetch and polling
+        fetchAndPlot();
+        setInterval(fetchAndPlot, 5000); // 5 Seconds Poll
+    </script>
+</body>
+
+</html>
